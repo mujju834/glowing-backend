@@ -7,6 +7,7 @@ const AsyncLock = require('async-lock');
 const mkdirp = require('mkdirp'); // To create directories recursively
 const crypto = require('crypto'); // To generate unique filenames
 const mongoose = require('mongoose');
+const WebSocket = require('ws');
 require('dotenv').config(); // Load environment variables from .env file
 
 const app = express();
@@ -25,7 +26,6 @@ mkdirp.sync(imagesDir);
 // MongoDB connection using environment variable
 const mongoURI = process.env.MONGODB_URI;
 mongoose.connect(mongoURI, { useNewUrlParser: true, useUnifiedTopology: true });
-console.log(mongoURI);
 
 const visitorSchema = new mongoose.Schema({
   count: { type: Number, default: 0 },
@@ -99,6 +99,7 @@ app.get('/api/visitors', async (req, res) => {
   try {
     const count = await incrementVisitorCount();
     res.json({ count });
+    broadcastVisitorCount(count);
   } catch (error) {
     console.error('Error updating visitor count:', error);
     res.status(500).json({ error: 'Error updating visitor count' });
@@ -109,6 +110,23 @@ app.get('/', (req, res) => {
   res.send('<h1>Welcome to the backend of Mujjus-web</p>');
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`Server running on port ${port}`);
+});
+
+// WebSocket server setup
+const wss = new WebSocket.Server({ server });
+
+const broadcastVisitorCount = (count) => {
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ count }));
+    }
+  });
+};
+
+wss.on('connection', (ws) => {
+  getVisitorCount().then((count) => {
+    ws.send(JSON.stringify({ count }));
+  });
 });
