@@ -99,6 +99,10 @@ app.get('/api/visitors', async (req, res) => {
   }
 });
 
+app.get('/', (req, res) => {
+  res.send('<h1>Welcome to the backend of Mujjus-web</p>');
+});
+
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
