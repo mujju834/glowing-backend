@@ -6,6 +6,8 @@ const mammoth = require('mammoth');
 const AsyncLock = require('async-lock');
 const mkdirp = require('mkdirp'); // To create directories recursively
 const crypto = require('crypto'); // To generate unique filenames
+const mongoose = require('mongoose');
+require('dotenv').config(); // Load environment variables from .env file
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -15,39 +17,43 @@ app.use(cors());
 app.use(express.json());
 app.use('/images', express.static(path.join(__dirname, 'images'))); // Serve images from the 'images' directory
 
-const visitorFilePath = path.join(__dirname, 'visitors.json');
 const imagesDir = path.join(__dirname, 'images');
 
 // Ensure the images directory exists
 mkdirp.sync(imagesDir);
 
+// MongoDB connection using environment variable
+const mongoURI = process.env.MONGODB_URI;
+mongoose.connect(mongoURI, { useNewUrlParser: true, useUnifiedTopology: true });
+console.log(mongoURI);
+
+const visitorSchema = new mongoose.Schema({
+  count: { type: Number, default: 0 },
+});
+
+const Visitor = mongoose.model('Visitor', visitorSchema);
+
 const getVisitorCount = async () => {
-  try {
-    const data = await fs.readFile(visitorFilePath, 'utf-8');
-    const json = JSON.parse(data);
-    console.log('Current visitor count:', json.count);
-    return json.count;
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      console.log('Visitors file not found, starting from 0');
-      return 0;
-    }
-    console.error('Error reading visitor file:', error);
-    throw error;
+  const visitor = await Visitor.findOne();
+  if (!visitor) {
+    const newVisitor = new Visitor({ count: 0 });
+    await newVisitor.save();
+    return 0;
   }
+  return visitor.count;
 };
 
 const incrementVisitorCount = async () => {
   return lock.acquire('visitor', async () => {
-    try {
-      const count = await getVisitorCount() + 1;
-      await fs.writeFile(visitorFilePath, JSON.stringify({ count }), 'utf-8');
-      console.log('Updated visitor count:', count);
-      return count;
-    } catch (error) {
-      console.error('Error updating visitor count:', error);
-      throw error;
+    const visitor = await Visitor.findOne();
+    if (!visitor) {
+      const newVisitor = new Visitor({ count: 1 });
+      await newVisitor.save();
+      return 1;
     }
+    visitor.count += 1;
+    await visitor.save();
+    return visitor.count;
   });
 };
 
