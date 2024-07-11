@@ -4,28 +4,28 @@ const path = require('path');
 const cors = require('cors');
 const mammoth = require('mammoth');
 const AsyncLock = require('async-lock');
-const mkdirp = require('mkdirp'); // To create directories recursively
-const crypto = require('crypto'); // To generate unique filenames
+const mkdirp = require('mkdirp');
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const WebSocket = require('ws');
-require('dotenv').config(); // Load environment variables from .env file
+const NodeCache = require('node-cache');
+require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 5000;
 const lock = new AsyncLock();
+const cache = new NodeCache({ stdTTL: 60, checkperiod: 120 }); // Cache with TTL of 60 seconds
 
 app.use(cors());
 app.use(express.json());
-app.use('/images', express.static(path.join(__dirname, 'images'))); // Serve images from the 'images' directory
+app.use('/images', express.static(path.join(__dirname, 'images')));
 
 const imagesDir = path.join(__dirname, 'images');
-
-// Ensure the images directory exists
 mkdirp.sync(imagesDir);
 
-// MongoDB connection using environment variable
 const mongoURI = process.env.MONGODB_URI;
 mongoose.connect(mongoURI, { useNewUrlParser: true, useUnifiedTopology: true });
+console.log(mongoURI);
 
 const visitorSchema = new mongoose.Schema({
   count: { type: Number, default: 0 },
@@ -34,12 +34,20 @@ const visitorSchema = new mongoose.Schema({
 const Visitor = mongoose.model('Visitor', visitorSchema);
 
 const getVisitorCount = async () => {
+  const cachedCount = cache.get('visitorCount');
+  if (cachedCount !== undefined) {
+    return cachedCount;
+  }
+  
   const visitor = await Visitor.findOne();
   if (!visitor) {
     const newVisitor = new Visitor({ count: 0 });
     await newVisitor.save();
+    cache.set('visitorCount', 0);
     return 0;
   }
+  
+  cache.set('visitorCount', visitor.count);
   return visitor.count;
 };
 
@@ -49,10 +57,13 @@ const incrementVisitorCount = async () => {
     if (!visitor) {
       const newVisitor = new Visitor({ count: 1 });
       await newVisitor.save();
+      cache.set('visitorCount', 1);
       return 1;
     }
+    
     visitor.count += 1;
     await visitor.save();
+    cache.set('visitorCount', visitor.count);
     return visitor.count;
   });
 };
@@ -107,14 +118,13 @@ app.get('/api/visitors', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.send('<h1>Welcome to the backend of Mujjus-web</p>');
+  res.send('<h1>Welcome to the backend of Mujjus-web</h1>');
 });
 
 const server = app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
 
-// WebSocket server setup
 const wss = new WebSocket.Server({ server });
 
 const broadcastVisitorCount = (count) => {
